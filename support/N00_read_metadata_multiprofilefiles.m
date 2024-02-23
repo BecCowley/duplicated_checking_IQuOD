@@ -1,16 +1,18 @@
-%%%%%%% read metadata and secondary data from WOD18 netCDF files
+%%%%%%% read metadata and secondary data from CODA netCDF files
+% CODA format files have each variable in a separate file and multiple
+% profiles in each file
+% could be adapted to work on ragged array netcdf files from WOD
 clear
 clc
 
-%%%%%% path with the WOD18 netCDf files
-filepath='/Users/cow074/code/CARS/CODA/';  %%% This path doesn't include all the year 1995 netCDF files. It is justed a demo
-%%%%%%% You need to download the netCDF files from WOD https://www.ncei.noaa.gov/access/world-ocean-database-select/dbsearch.html
+%%%%%% path with the CODA format netCDf files
+filepath='/oa-decadal-climate/work/observations/CARSv2_ancillary/CODA/CODA_test/2010/'; 
 
 filenames=dir(filepath);
 filenames([filenames.isdir])=[];
 n_files=length(filenames);
 
-DNA_series = []; files = [];
+DNA_series = []; files = {}; fileid = [];
 
 meta_name={'wod_unique_id','accession_number','dataset_name','lat','lon',...
     '','','','probe_type','recorder','','',...
@@ -38,10 +40,15 @@ variable_name={'wod_unique_id','accession_number','dataset_id','lat','lon',...
     'sum_salinity','sum_depth','std_depth','std_temp','std_salinity',...
     'corr_temp_depth','corr_sal_depth'};
 
-for nf = n_files
+for nf = 1:n_files
     file=[filepath,filenames(nf).name];
+    % Get filename from the path
+    [save_path, filename, ext] = fileparts(file);
+
+    disp(filename)
     n_prof = length(ncread(file,'cast'));
-    ds=single(NaN(n_prof,35));
+    disp(n_prof)
+    ds=double(NaN(n_prof,35));
 
     % Reading data from the NetCDF file
 
@@ -70,6 +77,10 @@ for nf = n_files
     time_calendar = ncreadatt(file,'time','calendar');
     % get the full time information:
     [time,timezone]=cdfdate2num(time_units,time_calendar,ncread(file,'time'));
+    if ~isdouble(time)
+        disp('time not double')
+        time = double(time);
+    end
     yyyy = year(time);
     mm = month(time);
     dd = day(time);
@@ -77,7 +88,8 @@ for nf = n_files
     MM = minute(time);
 
     % depth information
-    depth = ncread(file, 'Temperature_z');
+    var = strsplit(filename,'_');
+    depth = ncread(file, [var{5} '_z']);
     depth(depth > 12000 | depth < -10) = NaN;
     % sums and stdev:
     sum_depth = round(sum(depth,'omitnan'),4)';
@@ -96,9 +108,11 @@ for nf = n_files
         sum_temp(sum_temp == 0.0) = NaN;
         std_temp(std_temp == 0.0) = NaN;
         hasTemp = ~isnan(sum_temp)';
+
     catch
         temp = NaN*zeros(size(depth));
-        [sum_temp,std_temp,cor_temp_depth,hasTemp] = deal(zeros(n_depth,n_prof));
+        hasTemp = zeros(n_prof,1);
+        [sum_temp,std_temp,corr_temp_depth] = deal(NaN*zeros(n_prof,1));
     end
 
     % Read salinity and apply conditions
@@ -106,19 +120,33 @@ for nf = n_files
         sal = ncread(file, 'Salinity');
         sal(sal > 43 | sal < -1) = NaN;
 
-        sum_sal = round(sum(sal,'omitnan'), 4);
-        std_sal = round(std(sal,'omitnan'), 4);
-        hasSalinity = ~isnan(sum_sal)';
+        sum_salinity = round(sum(sal,'omitnan'), 4);
+        std_salinity = round(std(sal,'omitnan'), 4);
+        hasSalinity = ~isnan(sum_salinity)';
 
         % set zero sums to NaN (ie, no temperature data)
-        sum_temp(sum_sal == 0.0) = NaN;
-        std_temp(std_sal == 0.0) = NaN;
+        sum_salinity(sum_salinity == 0.0) = NaN;
+        std_salinity(std_salinity == 0.0) = NaN;
+        
 
     catch
         sal = NaN*zeros(size(depth));
-        [sum_sal,std_sal,cor_sal_depth,hasSalinity] = deal(zeros(1,n_prof));
+        hasSalinity = zeros(n_prof,1);
+        [sum_salinity,std_salinity,corr_sal_depth] = deal(NaN*zeros(n_prof,1));
     end
-
+    % get the correlation coefficients for the t/z and s/z relationships
+    for ip = 1:n_prof
+        inan = isnan(temp(:,ip) .* depth(:,ip));
+        if sum(~inan) > 0
+            temp2 = temp(~inan,ip);depth2 = depth(~inan,ip);
+            corr_temp_depth(ip) = round(corr(temp2, depth2), 5);
+        end
+        inan = isnan(sal(:,ip) .* depth(:,ip));
+        if sum(~inan) > 0
+            sal2 = sal(~inan,ip); depth2 = depth(~inan,ip);
+            corr_sal_depth(ip) = round(corr(sal2, depth2), 5);
+        end
+    end
     try
         oxygen = ncread(file, 'Oxygen');
         sum_oxy = sum(oxygen,'omitnan');
@@ -180,9 +208,6 @@ for nf = n_files
     ii = contains(dataset_name, pat);
     dataset_id(ii) = 14;
 
-    % Get filename from the path
-    [save_path, filename, ext] = fileparts(file);
-
     %%%%%%% put into the array and cell
     for a = 1:length(var_name)
         dat = eval(variable_name{a});
@@ -199,8 +224,39 @@ for nf = n_files
     end
     % add to the master arrays
     DNA_series = [DNA_series; ds];
-    files = [files,file];
+    files = [files;[filename ext]];
+    fileid = [fileid;repmat(nf,n_prof,1)];
+
 end
+% combine metadata from the same wod_unique_ids since we are reading
+% separate files for each variable
+[C, ia, ic] = unique(DNA_series(:,1));
+new_dna = DNA_series(ia,:);
+for a = 1:length(C)
+    ii = find(DNA_series(:,1) == C(a));
+    if length(ii) >1
+        % only for multiple records
+        % cols 1:14 should be identical
+        dd = diff(DNA_series(ii,[1:14,19:27,30:31]));
+        if any(dd) > 0
+            disp('Different metadata!!')
+            disp(DNA_series(ii,1))
+            disp(files(fileid(ii)))
+            continue
+        end
+        % assign ~NaN values to first version of the record
+        cols = [15:18,28:29,32:35];
+
+        % now assign to new_dna
+        for b = 2:length(ii)
+            dat = (DNA_series(ii(b),cols));
+            ij = ~isnan(dat) & dat > 0;
+            new_dna(a,cols(ij)) = DNA_series(ii(b),cols(ij));
+        end
+    end
+end
+fileid = fileid(ia);
+DNA_series = new_dna;
 
 yr = datestr(now,'yyyymmdd');
-save([filepath 'Metadata_summary_' yr '.mat'], 'DNA_series', 'variable_name','files')
+save([filepath 'Metadata_summary_' yr '.mat'], 'DNA_series', 'variable_name','files','fileid')
