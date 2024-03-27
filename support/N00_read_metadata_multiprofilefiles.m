@@ -3,18 +3,17 @@
 % profiles in each file
 % could be adapted to work on ragged array netcdf files from WOD
 clear
-clc
 
 %%%%%% path with the CODA format netCDf files
-filepath='/oa-decadal-climate/work/observations/CARSv2_ancillary/CODA/CODA_test/2010/'; 
+filepath='/oa-decadal-climate/work/observations/CARSv2_ancillary/CODA/CODA_test_v2/2010/'; 
 
-filenames=dir(filepath);
+filenames=dir([filepath '/*all*.nc']);
 filenames([filenames.isdir])=[];
 n_files=length(filenames);
 
-DNA_series = []; files = {}; fileid = [];
+DNA_series = []; files = {}; fileid = [];coda_id = [];
 
-meta_name={'wod_unique_id','accession_number','dataset_name','lat','lon',...
+meta_name={'CODA_ID','wod_unique_id','accession_number','dataset_name','lat','lon',...
     '','','','probe_type','recorder','','',...
     'depth_number','maximum_depth','hasTemp','hasSalinity','hasOxygen',...
     'hasChlorophyll','country_id','GMT_time','WMO_ID','dbase_orig',...
@@ -23,7 +22,7 @@ meta_name={'wod_unique_id','accession_number','dataset_name','lat','lon',...
     'sum_salinity','sum_depth','std_depth','std_temp','std_salinity',...
     'corr_temp_depth','corr_sal_depth'};
 
-var_name = {'WOD_id','Access_no','dataset','latitude','longitude',...
+var_name = {'CODA_ID','WOD_id','Access_no','dataset','latitude','longitude',...
     '','','','Temperature_Instrument','Recorder','','','','',...
     'Temperature','Salinity','Oxygen',...
     'Chlorophyll','country','GMT_time','','dbase_orig',...
@@ -31,7 +30,7 @@ var_name = {'WOD_id','Access_no','dataset','latitude','longitude',...
     'Institute','WOD_cruise_identifier','',...
     '','','','','',...
     '',''};
-variable_name={'wod_unique_id','accession_number','dataset_id','lat','lon',...
+variable_name={'CODA_ID','wod_unique_id','accession_number','dataset_id','lat','lon',...
     'yyyy','mm','dd','probe_type','recorder','HH','MM',...
     'depth_number','maximum_depth','hasTemp','hasSalinity','hasOxygen',...
     'hasChlorophyll','country_id','GMT_time','WMO_ID','dbase_orig',...
@@ -55,8 +54,8 @@ for nf = 1:n_files
     for ivar = 1:length(meta_name)
         if ~isempty(meta_name{ivar})
             switch ivar
-                case [9, 10, 19, 22:27] %text format
-                    dat = repmat('', n_prof,1);
+                case {1, 4, 10, 11, 20, 23:28} %text format
+                    dat = repmat("", n_prof,1);
                 otherwise
                     dat = NaN*ones(n_prof,1);
             end
@@ -66,7 +65,7 @@ for nf = 1:n_files
                     dat = dat';
                 end
             catch
-
+                disp(['File does not contain variable ' meta_name{ivar}])
             end
             eval([meta_name{ivar} ' = dat;'])
         end
@@ -88,8 +87,7 @@ for nf = 1:n_files
     MM = minute(time);
 
     % depth information
-    var = strsplit(filename,'_');
-    depth = ncread(file, [var{5} '_z']);
+    depth = ncread(file, 'z');
     depth(depth > 12000 | depth < -10) = NaN;
     % sums and stdev:
     sum_depth = round(sum(depth,'omitnan'),4)';
@@ -124,7 +122,7 @@ for nf = 1:n_files
         std_salinity = round(std(sal,'omitnan'), 4);
         hasSalinity = ~isnan(sum_salinity)';
 
-        % set zero sums to NaN (ie, no temperature data)
+        % set zero sums to NaN (ie, no salinity data)
         sum_salinity(sum_salinity == 0.0) = NaN;
         std_salinity(std_salinity == 0.0) = NaN;
         
@@ -162,7 +160,20 @@ for nf = 1:n_files
         hasChlorophyll = zeros(n_prof,1);
     end
 
+    if isempty(dbase_orig)
+        % get the info from filename
+        nam = strsplit(filename,'_');
+        nam = nam{1};
+        dbase_orig = repmat(nam,n_prof,1);
+    end
+
     dataset_id = NaN*ones(n_prof,1);
+    if isempty(dataset_name)
+        % get the info from filename
+        nam = strsplit(filename,'_');
+        nam = nam{4};
+        dataset_name = repmat(nam,n_prof,1);
+    end
     dataset_name = string(deblank(lower(dataset_name)));
     % Assign a number for each dataset type
     pat = ["bod", "bottle", "ocean station", "osd", "low-resolution", "low resolution"];
@@ -226,37 +237,40 @@ for nf = 1:n_files
     DNA_series = [DNA_series; ds];
     files = [files;[filename ext]];
     fileid = [fileid;repmat(nf,n_prof,1)];
+    coda_id = [coda_id;CODA_ID];
 
 end
-% combine metadata from the same wod_unique_ids since we are reading
-% separate files for each variable
-[C, ia, ic] = unique(DNA_series(:,1));
-new_dna = DNA_series(ia,:);
-for a = 1:length(C)
-    ii = find(DNA_series(:,1) == C(a));
-    if length(ii) >1
-        % only for multiple records
-        % cols 1:14 should be identical
-        dd = diff(DNA_series(ii,[1:14,19:27,30:31]));
-        if any(dd) > 0
-            disp('Different metadata!!')
-            disp(DNA_series(ii,1))
-            disp(files(fileid(ii)))
-            continue
-        end
-        % assign ~NaN values to first version of the record
-        cols = [15:18,28:29,32:35];
+% % combine metadata from the same wod_unique_ids since we are reading
+% % separate files for each variable
+% [C, ia, ic] = unique(DNA_series(:,1));
+% new_dna = DNA_series(ia,:);
+% for a = 1:length(C)
+%     ii = find(DNA_series(:,1) == C(a));
+%     if length(ii) >1
+%         % only for multiple records
+%         % cols 1:14 should be identical
+%         dd = diff(DNA_series(ii,[1:14,19:27,30:31]));
+%         if any(dd) > 0
+%             disp('Different metadata!!')
+%             disp(DNA_series(ii,1))
+%             disp(files(fileid(ii)))
+%             continue
+%         end
+%         % assign ~NaN values to first version of the record
+%         cols = [15:18,28:29,32:35];
+% 
+%         % now assign to new_dna
+%         for b = 2:length(ii)
+%             dat = (DNA_series(ii(b),cols));
+%             ij = ~isnan(dat) & dat > 0;
+%             new_dna(a,cols(ij)) = DNA_series(ii(b),cols(ij));
+%         end
+%     end
+% end
+% fileid = fileid(ia);
+% delete first column ready for N02 code. Skip NO1, no need for it.
+variable_name(1:2) = [];
+DNA_series = DNA_series(:,3:end);
 
-        % now assign to new_dna
-        for b = 2:length(ii)
-            dat = (DNA_series(ii(b),cols));
-            ij = ~isnan(dat) & dat > 0;
-            new_dna(a,cols(ij)) = DNA_series(ii(b),cols(ij));
-        end
-    end
-end
-fileid = fileid(ia);
-DNA_series = new_dna;
-
-yr = datestr(now,'yyyymmdd');
-save([filepath 'Metadata_summary_' yr '.mat'], 'DNA_series', 'variable_name','files','fileid')
+save([filepath 'Metadata_summary.mat'], 'DNA_series', ...
+    'variable_name','files','fileid','coda_id')
