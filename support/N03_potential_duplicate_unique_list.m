@@ -4,8 +4,8 @@ clear
 clc
 
 
-year=1995;
-files_txt=dir(['./potential_duplicates_output/',num2str(year),'/potential_dup*.txt']);
+year=2010;
+files_txt=dir(['./potential_duplicates_output/potential_dup*.txt']);
 
 filenames_column1={};
 filenames_column2={};

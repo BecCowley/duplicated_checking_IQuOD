@@ -1,13 +1,12 @@
 %%% Focus on searching for potential duplicate pairs that are equal in sum_depth and sum_temperature
 
 clear
+flist = dir([pwd '/*.mat']);
 clc
 
-for nian=1975:1975
-    
-    eval(['load DNA_summary_',num2str(nian),'.mat'])
-    
-    
+for nian=1:length(flist)
+    load([flist(nian).folder '/' flist(nian).name])
+        
     DNA_series_temp_depth_1=DNA_series(:,[27,29]); % sum_temp,sum_depth
     DNA_series_temp_depth_1(abs(DNA_series_temp_depth_1)>1e6)=NaN; % set missing value to Nan
     % figure()
@@ -21,13 +20,14 @@ for nian=1975:1975
     
     %%% Sort average_DNA in ascending order to facilitate the establishment of the later search algorithm
     [average_DNA,index]=sort(average_DNA);
-    filename_info=filename_info(index,:);
+    fileid=fileid(index);
+    coda_id=coda_id(index,:);
     DNA_series=DNA_series(index,:);
     
     %%% Cyclic search
     output_variables=['filename',variable_name];
     
-    filename=['./potential_duplicates_output/',num2str(nian),'/potential_duplicate_',num2str(nian),'_mapminmax_depth_temp.txt'];
+    filename=['./potential_duplicates_output/potential_duplicate_',num2str(nian),'_mapminmax_depth_temp.txt'];
     if(exist(filename))
         delete(filename)
     end
@@ -103,7 +103,7 @@ for nian=1975:1975
          
             %%% Output filename
             for m=1:length(id)
-                fprintf(fid,'%s ',filename_info(id(m),:));
+                fprintf(fid,'%s ',files{fileid(id(m),:)}, coda_id(id(m),:));
             end
             fprintf(fid,'\n');
             

@@ -2,12 +2,12 @@
 %%% Use all of the metadata
 
 clear
+flist = dir([pwd '/*.mat']);
 clc
 
-for nian=1975:1975
-    
-    eval(['load DNA_summary_',num2str(nian),'.mat'])
-    
+for nian=1:length(flist)
+    load([flist(nian).folder '/' flist(nian).name])    
+
     DNA_series_copy=DNA_series;
     DNA_series_copy(:,20)=[]; % WMO ID information is small, delete
     
@@ -27,14 +27,15 @@ for nian=1975:1975
       
     %%% Sort average_DNA in ascending order to facilitate the establishment of the later search algorithm
     [average_DNA,index]=sort(average_DNA);
-    filename_info=filename_info(index,:);
+    fileid=fileid(index);
+    coda_id=coda_id(index,:);
     DNA_mapped=DNA_mapped(index,:);
     DNA_series=DNA_series(index,:);
     
     %%% Cyclic search
     output_variables=['filename',variable_name];
     
-    filename=['./potential_duplicates_output/',num2str(nian),'/potential_duplicate_',num2str(nian),'_weight_allinfo.txt']
+    filename=['./potential_duplicates_output/potential_duplicate_',num2str(nian),'_weight_allinfo.txt']
     if(exist(filename))
         delete(filename)
     end
@@ -63,7 +64,7 @@ for nian=1975:1975
             if(any(abs(DNA_series_small(1,[33,34])-DNA_series_small(2,[33,34]))<1e-4)) 
                 %%% Output filename
                 for m=1:length(id)
-                    fprintf(fid,'%s ',filename_info(id(m),:));
+                    fprintf(fid,'%s ',fileid(id(m),:));
                 end
                 fprintf(fid,'\n');
                 
@@ -102,7 +103,7 @@ for nian=1975:1975
                       
             %%% Output filename
             for m=1:length(id)
-                fprintf(fid,'%s ',filename_info(id(m),:));
+                fprintf(fid,'%s ',files{fileid(id(m),:)}, coda_id(id(m),:));
             end
             fprintf(fid,'\n');
             

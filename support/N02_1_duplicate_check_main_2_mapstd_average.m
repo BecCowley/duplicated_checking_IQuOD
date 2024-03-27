@@ -2,10 +2,10 @@
 %%% Output the potential duplicated data to a txt file
 clear
 clc
+flist = dir([pwd '/*.mat']);
 
-for nian=1975:1975
-    
-    eval(['load DNA_summary_',num2str(nian),'.mat'])
+for nian=1:length(flist)
+    load([flist(nian).folder '/' flist(nian).name])
     
     %%% Normalization: The data is normalized to data with a mean of 0 and a variance of 1
     DNA_series_copy=DNA_series;
@@ -20,14 +20,15 @@ for nian=1975:1975
     
     %%% Sort average_DNA in ascending order to facilitate the establishment of the later search algorithm
     [average_DNA,index]=sort(average_DNA);
-    filename_info=filename_info(index,:);
+    fileid=fileid(index,:);
+    coda_id=coda_id(index,:);
     DNA_mapped=DNA_mapped(index,:);
     DNA_series=DNA_series(index,:);
     
     %%% Cyclic search
-    output_variables=['filename',variable_name];
+    output_variables=['CODA_ID',variable_name]; % not currently used
     
-    filename=['./potential_duplicates_output/',num2str(nian),'/potential_duplicate_mapstd_',num2str(nian),'.txt'];
+    filename=['./potential_duplicates_output/potential_duplicate_mapstd_',num2str(nian),'.txt'];
     if(exist(filename))
         delete(filename)
     end
@@ -53,10 +54,10 @@ for nian=1975:1975
             end
             
             %%% Depth or temperature or salinity are scaled or translation, direct output
-            if(any(abs(DNA_series_small(1,[33,34])-DNA_series_small(2,[33,34]))<1e-4)) % Same correlation coefficient
+            if any(abs(DNA_series_small(1,[33,34])-DNA_series_small(2,[33,34]))<1e-4) % Same correlation coefficient
                 %%% Output filename
                 for m=1:length(id)
-                    fprintf(fid,'%s ',filename_info(id(m),:));
+                    fprintf(fid,'%s ',files{fileid(id(m),:)}, coda_id(id(m),:));
                 end
                 fprintf(fid,'\n');
                 
@@ -66,15 +67,18 @@ for nian=1975:1975
             end
             
             %%% Calculate how many similar fragments there are
-            fragment_same_number=sum(abs(DNA_series_small(1,:)-DNA_series_small(2,:))<1e-5,'omitnan');
-            if(fragment_same_number<25)  % less than 25
+            % omitnan is not relevant here as the abs of one row-any others
+            % does not return nans. If we want to omit nans, have to do it
+            % before calculating absolute difference. 
+            fragment_same_number=sum(abs(DNA_series_small(1,:)-DNA_series_small(2,:))<1e-5); %,'omitnan');
+            if all(fragment_same_number<25)  % less than 25
                 continue 
             end
             
             %%% If it is XBT CTD MBT BOT; the location difference is plus or minus 5 degrees within a month; the same probe----excludes navigation continuous observation
             %%% If type,platform, and vehicle are the same, but sum_temp,corr(temp,depth) are different, it is judged to be multiple observations on the same survey ship/platform on the same route
             if((DNA_series_small(1,2)==4 && DNA_series_small(2,2)==4) || (DNA_series_small(1,2)==2 && DNA_series_small(2,2)==2) || (DNA_series_small(1,2)==1 && DNA_series_small(2,2)==1) || (DNA_series_small(1,2)==3 && DNA_series_small(2,2)==3))
-                index1=all(DNA_series_small(1,[5,6,8,23,24,26])==DNA_series_small(2,[5,6,8,23,24,26])); 
+                index1=all(DNA_series_small(1,[5,6,8,23,24,26])==DNA_series_small(2,[5,6,8,23,24,26]));
                 index2= abs(DNA_series_small(1,27)-DNA_series_small(2,27))>0.099; % sum_temp is different
                 index3= abs(DNA_series_small(1,33)-DNA_series_small(2,33))>0.001; % cor_temp_depth is different
                 index4=any(abs(DNA_series_small(1,[3,4])-DNA_series_small(2,[3,4]))<5) && any(abs(DNA_series_small(1,[3,4])-DNA_series_small(2,[3,4]))>1e-5);
@@ -82,12 +86,12 @@ for nian=1975:1975
                     continue
                 end
             end
-            %%% Exclude long-term continuous observation of fixed points/nearby points(MRB、Bottle、SUR、XBT)
-            if((DNA_series_small(1,2)==1 && DNA_series_small(2,2)==1) || (DNA_series_small(1,2)==7 && DNA_series_small(2,2)==7) || (DNA_series_small(1,2)==5 && DNA_series_small(2,2)==5) || (DNA_series_small(1,2)==4 && DNA_series_small(2,2)==4))
-                index1=all(DNA_series_small(1,[5,6,8,9,22,23,24])==DNA_series_small(2,[5,6,8,9,22,23,24]));
+            %%% Exclude long-term continuous observation of fixed points/nearby points(MRB、Bottle、SUR)
+            if((DNA_series_small(1,2)==1 && DNA_series_small(2,2)==1) || (DNA_series_small(1,2)==7 && DNA_series_small(2,2)==7) || (DNA_series_small(1,2)==5 && DNA_series_small(2,2)==5))
+                index1=all(DNA_series_small(1,[5,6,8,9,22,23,24])==DNA_series_small(2,[5,6,8,9,22,23,24]));  
                 index2=abs(DNA_series_small(1,27)-DNA_series_small(2,27))>0.05; % sum_temp is different
                 index3=abs(DNA_series_small(1,29)-DNA_series_small(2,29))<1e-5; % sum_depth is same
-                index4=all(abs(DNA_series_small(1,[3,4])-DNA_series_small(2,[3,4]))<0.01);  % fixed point: latitude and longitude less than 0.01 degree
+                index4=all(abs(DNA_series_small(1,[3,4])-DNA_series_small(2,[3,4]))<0.01);   % fixed point: latitude and longitude less than 0.01 degree
                 if(index1 && index2 && index3 && index4)
                     continue
                 end
@@ -95,7 +99,7 @@ for nian=1975:1975
                        
             %%% Output filename
             for m=1:length(id)
-                fprintf(fid,'%s ',filename_info(id(m),:));
+                fprintf(fid,'%s ',files{fileid(id(m),:)}, coda_id(id(m),:));
             end
             fprintf(fid,'\n');
             
