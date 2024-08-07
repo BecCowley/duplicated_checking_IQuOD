@@ -102,6 +102,9 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
             print(f"Failed to open {filename}: {str(e)}")
             continue
 
+        # number of profiles is number of casts
+        n_prof = len(f['cast'].values)
+
         # Read 'z' (depth) data
         depth = f['z'].values
 
@@ -130,7 +133,6 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
 
             # Filter out NaN values for further processing
             mask = np.isnan(temp)
-            temp[mask] = np.nan
             depth2 = depth
             depth2[mask] = np.nan # Assuming 'depth' is already defined and processed similarly
 
@@ -160,7 +162,6 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
 
             # Filter out NaN values for further processing
             mask = np.isnan(sal)
-            sal[mask] = np.nan
             depth2 = depth
             depth2[mask] = np.nan  # Assuming 'depth' is already defined and processed similarly
 
@@ -181,100 +182,32 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
             PSS_series['sum_salinity'] = PSS_series['sum_salinity'].replace(0, np.nan)
             PSS_series['std_salinity'] = PSS_series['std_salinity'].replace(0, np.nan)
 
-        if 'Oxygen' in f:
-            oxy = f['Oxygen'].values
-            DNA_series['hasOxygen'] = np.any(~np.isnan(oxy), axis=1)
-
-        if 'Chlorophyll' in f:
-            chl = f['Chlorophyll'].values
-            DNA_series['hasChlorophyll'] = np.any(~np.isnan(chl), axis=1)
+        # loop over some of the variables where we just need to know if they exist or not
+        for var in ['Oxygen', 'Chlorophyll']:
+            if var in f:
+                PSS_series[f'has{var}'] = np.any(~np.isnan(f[var].values), axis=1)
 
         # Try to read various attributes and variables
-        if 'CODA_id' in f:
-            wodid = f['CODA_id'].values
-            DNA_series['WOD_unique_id'] = wodid
-
-        # Read geographic coordinates
-        if 'lat' in f:
-            lat = np.round(f['lat'].values, 4)
-            DNA_series['lat'] = lat
-
-        if 'lon' in f:
-            lon = np.round(f['lon'].values, 4)
-            DNA_series['lon'] = lon
+        for var in ['WMO_id', 'lat', 'lon', 'Access_no']:
+            if var in f.variables:
+                PSS_series[var] = np.float64(f[var].values)
 
         # Read and process date and time
         time_var = f['time'].values
         PSS_series['datetime'] = nc.num2date(time_var, f['time'].attrs['units'])
 
-        try:
-            recorder = f.variables['Recorder'][:]
-            recorder = bytes(recorder[~recorder.mask]).decode('ascii')
-        except:
-            recorder = ''
-
-        try:
-            GMT_time = np.float64(f.variables['GMT_time'][:])
-        except:
-            GMT_time = np.nan
-
-        try:
-            WMO_id = np.float64(f.variables['WMO_ID'][:])
-        except:
-            WMO_id = np.nan
-
-        # Reading and processing the 'dbase_orig' attribute
-        try:
-            dbase_orig = f.variables['dbase_orig'][:]
-            dbase_orig = bytes(dbase_orig[~dbase_orig.mask]).decode('ascii')
-        except:
-            dbase_orig = ''
-
-        # Reading and processing the 'Project' attribute
-        try:
-            project_name = f.variables['Project'][:]
-            project_name = bytes(project_name[~project_name.mask]).decode('ascii')
-        except:
-            project_name = ''
-
-        # Reading and processing the 'Platform' attribute
-        try:
-            platform = f.variables['platform'][:]
-            platform = bytes(platform[~platform.mask]).decode('ascii')
-            # print(platform)
-        except:
-            platform = ''
-
-        # Reading and processing the 'Ocean_Vehicle' attribute
-        try:
-            ocean_vehicle = f.variables['Ocean_Vehicle'][:]
-            ocean_vehicle = bytes(ocean_vehicle[~ocean_vehicle.mask]).decode('ascii')
-            # print(ocean_vehicle)
-        except:
-            ocean_vehicle = ''
-
-        # Reading 'Access_no'
-        try:
-            accession_number = f.variables['Access_no'][:]
-        except:
-            accession_number = np.nan
-
-        # Reading and processing the 'Institute' attribute
-        try:
-            institute = f.variables['Institute'][:]
-            institute = bytes(institute[~institute.mask]).decode('ascii') 
-            # print('Institute ='+institute)       
-        except:
-            institute = ''
-
-        # Reading and processing the 'WOD_cruise_identifier' attribute
-        try:
-            wod_cruise_identifier = f.variables['WOD_cruise_identifier'][:]
-            wod_cruise_identifier = bytes(wod_cruise_identifier[~wod_cruise_identifier.mask]).decode('ascii')         
-        except:
-            wod_cruise_identifier = ''
-        # print(wod_cruise_identifier)
-
+    # Loop over variables for ascii sum
+        for var in ['CODA_id', 'country', 'Temperature_Instrument', 'needs_z_fix', 'Recorder', 'dbase_orig',
+                    'Project', 'Platform', 'WOD_cruise_identifier', 'Institute']:
+            if var in f.variables:
+                var_char = np.array([x.decode('utf-8') for x in f[var].values], dtype=str)
+            else:
+                var_char = np.array(['' for _ in range(n_prof)], dtype=str)
+            # loop over all the profiles and convert the country_name, needs_z_fix and probe_type to ASCII sum
+            for i in range(n_prof):
+                    if var_char[i]:
+                        ASCII_sum = sum(ord(char) for char in var_char[i] if char != ' ')
+                        PSS_series[var][i] = ASCII_sum
 
         try:
             dataset_name = f.variables['dataset'][:]
@@ -313,16 +246,6 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
                 dataset_id = np.nan
         except:
             dataset_id = np.nan
-
-        # Reading 'lat' and 'lon'
-        try:
-            latitude = np.round(f.variables['lat'][:], 4)
-        except:
-            latitude = np.nan
-        try:
-            longitude = np.round(f.variables['lon'][:], 4)
-        except:
-            ongitude = np.nan
 
 
         # Store the processed data
