@@ -27,7 +27,7 @@ The variables included in the WOD18 netCDF files can be checked in Table 3 in th
 we used the following metadata and secondly stat information to calculate the Profile Summary Score (PSS) for each profiles
 meta_names = ['WOD_unique_id','accession_number', 'dataset_id', 'lat', 'lon', 'year', 'month', 'day', 'probe type',
               'recorder', 'hour', 'minute', 'depth_number', 'maximum_depth', 'hasTemp', 'hasSalinity', 'hasOxygen',
-              'hasChlonophyll', 'country_name', 'GMT_time', 'WMO_ID', 'dbase_orig', 'project_name', 'Platform',
+              'hasChlorophyll', 'country_name', 'GMT_time', 'WMO_ID', 'dbase_orig', 'project_name', 'Platform',
               'ocean_vehicle', 'Institute', 'WOD_cruise_identifier', 'sum_temp', 'sum_salinity', 'sum_depth',
               'std_depth', 'std_temp', 'std_salinity', 'corr_temp_depth', 'corr_sal_depth']
 
@@ -45,11 +45,13 @@ Usage:
 import os
 import numpy as np
 import netCDF4 as nc
+import pandas as pd
 from netCDF4 import Dataset
 from datetime import datetime, timedelta
 import warnings
 import sys
 import argparse
+import xarray as xr
 
 ## Used to determine whether the input path is correct
 def validate_path(input_path):
@@ -74,21 +76,23 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
 
     # Get all file names in the directory that are not directories themselves
     filenames = [f for f in os.listdir(inputpath) if os.path.isfile(os.path.join(inputpath, f))]
-    n_prof = len(filenames)
 
     # print(filenames)
     # Initialize data structures
-    meta_names = ['WOD_unique_id', 'accession_number', 'dataset_id', 'lat', 'lon', 'year', 'month', 'day', 'probe type',
-                  'recorder', 'hour', 'minute', 'depth_number', 'maximum_depth', 'hasTemp', 'hasSalinity', 'hasOxygen',
-                  'hasChlorophyll', 'country_name', 'GMT_time', 'WMO_ID', 'dbase_orig', 'project_name', 'Platform',
+    meta_names = ['WOD_id', 'CODA_id', 'Access_no', 'dataset', 'lat', 'lon', 'datetime', 'Temperature_Instrument',
+                  'Recorder', 'needs_z_fix', 'depth_number', 'maximum_depth', 'hasTemp', 'hasSalinity', 'hasOxygen',
+                  'hasChlorophyll', 'country', 'WMO_ID', 'dbase_orig', 'Project', 'Platform',
                   'ocean_vehicle', 'Institute', 'WOD_cruise_identifier', 'sum_temp', 'sum_salinity', 'sum_depth',
                   'std_depth', 'std_temp', 'std_salinity', 'corr_temp_depth', 'corr_sal_depth']
-    # create an empty dataframe DNA_series with meta_names as headers
-    DNA_series = pd.DataFrame(columns=meta_names)
+    # create an empty dataframe PSS_series with meta_names as headers
+    PSS_series = pd.DataFrame(columns=meta_names)
+
+    # number of files:
+    n_files = len(filenames)
 
     # Process each file
     for idx, filename in enumerate(filenames):
-        print(f"Processing file {idx+1}/{n_prof}: {filename}")
+        print(f"Processing file {idx+1}/{n_files}: {filename}")
         file_path = os.path.join(inputpath, filename)
 
         # Open the netCDF file as xarray dataset
@@ -105,17 +109,17 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
         depth = np.where((depth > 12000) | (depth < -10), np.nan, depth)
 
         # Calculate number of depth measurements
-        DNA_series['depth_number'] = np.count_nonzero(~np.isnan(depth), axis=1)  # Using len() since depth is a numpy array
+        PSS_series['depth_number'] = np.count_nonzero(~np.isnan(depth), axis=1)  # Using len() since depth is a numpy array
 
         # Determine maximum depth, taking care only to consider valid (non-NaN) entries
         if np.any(~np.isnan(depth)):
-            DNA_series['maximum_depth'] = np.nanmax(depth, axis=1)
+            PSS_series['maximum_depth'] = np.nanmax(depth, axis=1)
         else:
-            DNA_series['maximum_depth'] = np.nan
+            PSS_series['maximum_depth'] = np.nan
 
         # Compute the sum and standard deviation of depth, rounding to four decimal places
-        DNA_series['sum_depth'] = np.round(np.nansum(depth, axis=1), 4)
-        DNA_series['std_depth'] = np.round(np.nanstd(depth, axis =1), 4)
+        PSS_series['sum_depth'] = np.round(np.nansum(depth, axis=1), 4)
+        PSS_series['std_depth'] = np.round(np.nanstd(depth, axis =1), 4)
 
         # Read 'Temperature' data
         if 'Temperature' in f:
@@ -131,21 +135,21 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
             depth2[mask] = np.nan # Assuming 'depth' is already defined and processed similarly
 
             # Check if there are valid temperature readings
-            DNA_series['hasTemp'] = np.any(~np.isnan(temp), axis =1)
+            PSS_series['hasTemp'] = np.any(~np.isnan(temp), axis =1)
 
             # Compute the sum, standard deviation, and correlation coefficient, if applicable
-            DNA_series['sum_temp'] = np.round(np.nansum(temp, axis=1), 5)
-            DNA_series['std_temp'] = np.round(np.nanstd(temp, axis=1), 5)
+            PSS_series['sum_temp'] = np.round(np.nansum(temp, axis=1), 5)
+            PSS_series['std_temp'] = np.round(np.nanstd(temp, axis=1), 5)
             # Calculate correlation if both arrays have non-NaN data and at least two data points
             for i in range(temp.shape[0]):
                 if len(~np.isnan(temp[i])) >= 2:
                     mask = ~np.isnan(temp[i]) & ~np.isnan(depth2[i])
                     if np.sum(mask) > 1:  # Ensure there are at least two points to correlate
-                        DNA_series['corr_temp_depth'][i] = np.corrcoef(temp[i, mask], depth2[i, mask])[0, 1]
+                        PSS_series['corr_temp_depth'][i] = np.corrcoef(temp[i, mask], depth2[i, mask])[0, 1]
 
             # Handle edge cases explicitly
-            DNA_series['sum_temp'] = DNA_series['sum_temp'].replace(0, np.nan)
-            DNA_series['std_temp'] = DNA_series['std_temp'].replace(0, np.nan)
+            PSS_series['sum_temp'] = PSS_series['sum_temp'].replace(0, np.nan)
+            PSS_series['std_temp'] = PSS_series['std_temp'].replace(0, np.nan)
 
        # Read 'Salinity' data
         if 'Salinity' in f:
@@ -161,21 +165,21 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
             depth2[mask] = np.nan  # Assuming 'depth' is already defined and processed similarly
 
             # Check if there are valid salinity readings
-            DNA_series['hasSalinity'] = np.any(~np.isnan(sal), axis=1)
+            PSS_series['hasSalinity'] = np.any(~np.isnan(sal), axis=1)
 
             # Compute the sum, standard deviation, and correlation coefficient, if applicable
-            DNA_series['sum_salinity'] = np.round(np.nansum(sal, axis=1), 5)
-            DNA_series['std_salinity'] = np.round(np.nanstd(sal, axis=1), 5)
+            PSS_series['sum_salinity'] = np.round(np.nansum(sal, axis=1), 5)
+            PSS_series['std_salinity'] = np.round(np.nanstd(sal, axis=1), 5)
             # Calculate correlation if both arrays have non-NaN data and at least two data points
             for i in range(sal.shape[0]):
                 if len(~np.isnan(sal[i])) >= 2:
                     mask = ~np.isnan(sal[i]) & ~np.isnan(depth2[i])
                     if np.sum(mask) > 1:  # Ensure there are at least two points to correlate
-                        DNA_series['corr_sal_depth'][i] = np.corrcoef(sal[i, mask], depth2[i, mask])[0, 1]
+                        PSS_series['corr_sal_depth'][i] = np.corrcoef(sal[i, mask], depth2[i, mask])[0, 1]
 
             # Handle edge cases explicitly
-            DNA_series['sum_salinity'] = DNA_series['sum_salinity'].replace(0, np.nan)
-            DNA_series['std_salinity'] = DNA_series['std_salinity'].replace(0, np.nan)
+            PSS_series['sum_salinity'] = PSS_series['sum_salinity'].replace(0, np.nan)
+            PSS_series['std_salinity'] = PSS_series['std_salinity'].replace(0, np.nan)
 
         if 'Oxygen' in f:
             oxy = f['Oxygen'].values
@@ -201,28 +205,7 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
 
         # Read and process date and time
         time_var = f['time'].values
-        dtime = nc.num2date(time_var, f['time'].attrs['units'])
-        DNA_series['year'] = dtime.year
-        DNA_series['month'] = dtime.month
-        DNA_series['day'] = dtime.day
-        DNA_series['hour'] = dtime.hour
-        DNA_series['minute'] = dtime.minute
-
-        if 'country' in f:
-            DNA_series['country_name'] = f['country'].values
-            country_name = bytes(country_name[~country_name.mask]).decode('ascii')
-
-        try:
-            probe_type = f.variables['Temperature_Instrument'][:]
-            probe_type = bytes(probe_type[~probe_type.mask]).decode('ascii')
-        except:
-            probe_type = ''
-
-        try:
-            need_z_fix = f.variables['need_z_fix'][:]
-            need_z_fix = bytes(need_z_fix[~need_z_fix.mask]).decode('ascii')
-        except:
-            need_z_fix = ''
+        PSS_series['datetime'] = nc.num2date(time_var, f['time'].attrs['units'])
 
         try:
             recorder = f.variables['Recorder'][:]
@@ -356,10 +339,10 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
         txt[idx][26]=str(wod_cruise_identifier)
         strings_columns_order=[8,9,18,21,22,23,24,25,26]
 
-        DNA_series[idx,0:8]=[wod_unique_id, accession_number, dataset_id, latitude, longitude, year, month, day]
-        DNA_series[idx,10:18]=[hour, minute, depth_number, maximum_depth, hasTemp, hasSalinity, hasOxygen,hasChlorophyll]
-        DNA_series[idx,19:21]=[GMT_time,WMO_id]
-        DNA_series[idx,27:35]=[sum_temp, sum_sal, sum_depth, std_depth, std_temp, std_sal, cor_temp_depth, cor_sal_depth]
+        PSS_series[idx, 0:8]=[wod_unique_id, accession_number, dataset_id, latitude, longitude, year, month, day]
+        PSS_series[idx, 10:18]=[hour, minute, depth_number, maximum_depth, hasTemp, hasSalinity, hasOxygen, hasChlorophyll]
+        PSS_series[idx, 19:21]=[GMT_time, WMO_id]
+        PSS_series[idx, 27:35]=[sum_temp, sum_sal, sum_depth, std_depth, std_temp, std_sal, cor_temp_depth, cor_sal_depth]
 
 
         # Close the netCDF file
@@ -367,7 +350,7 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
 
 
     # Delete WOD_unique_id
-    DNA_series=DNA_series[:,1:]
+    PSS_series= PSS_series[:, 1:]
     txt = [row[1:] for row in txt]
     del meta_names[0]   #Delete WOD_unique_id
 
@@ -379,7 +362,7 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
             if j < len(txt[i]): 
                 # sum of all ACILL for each string varaible
                 ASCII_sum = sum(ord(char) for char in txt[i][j] if char != ' ')
-                DNA_series[i][j] = ASCII_sum
+                PSS_series[i][j] = ASCII_sum
 
 
     ###### check output folders
