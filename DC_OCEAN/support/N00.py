@@ -389,15 +389,16 @@ def read_netCDF_formatted_PSS_series(inputpath, outputpath):
     # Define the path for the 'Input_files' directory within the parent directory
     input_files_directory = os.path.join(parent_directory, 'Input_files')
     # Check if the 'Input_files' directory exists, and create it if it does not
-    if not os.path.exists(input_files_directory):
-        os.makedirs(input_files_directory)
+    if not os.path.exists(outputpath):
+        os.makedirs(outputpath)
 
     # Save the data in .npz format
-    output_filename=os.path.join(input_files_directory,'DNA_summary.npz')
-    np.savez(output_filename, DNA_series=DNA_series, txt=txt,meta_names=meta_names,filenames=filenames)
+    output_filename=os.path.join(outputpath,'Profile_Summary_Score_list.npz')
+    np.savez(output_filename, PSS_series=PSS_series, txt=txt,meta_names=meta_names,filenames=filenames)
 
-    print('The DNA formatted file are output to current folder: '+input_files_directory+'\n')
-    print('The DNA filename is: '+output_filename)
+    print('*******************FINISHED***********************************\n')
+    print('The Profile Summary Score formatted file are output to current folder: '+outputpath+'\n')
+    print('The Profile Summary Score filename is: '+output_filename)
 
 
 if __name__ == '__main__':
