@@ -1,49 +1,43 @@
 #!/usr/bin/env python3
+
+########################################################################
+### @copyright Copyright (C) 2024 All Rights Reserved.
+### @brief 
+### @version
+###		Date	|	Author			|	Version		|	Description
+### ------------|-------------------|---------------|---------------
+### 2024-03-26	|                   |	1.1			|	Create
+### 2024-06-01	|                   |	1.2			|	Create
+### 2024-07-04	|                   |	1.3			|	Create
+######################################################################
+
+
 """
 This script used for pre-processing profile data (only supports WOD18 netCDF format files).
+This script aims at reading the metadata and secondary information from the original netCDF files (we use the WOD18 single netCDF format) and then processing the metadata to create a data-metadata full list
+
 During the process:
 --Numerical metadata are retained.
 --String metadata are converted into numerical values by using the ASCII code to convert each letter (including spaces) and then add the ASCII code of each letter to obtain final values.
-The results are stored in npz format file.
+The results are stored in *.npz format file.
 
 ***For data that is not in WOD18 netCDF format, it needs to be rewritten as WOD18 format firstly.
-The variables included in the WOD18 netCDF files and their order are (keep blank if there are no variables):
-Access_no
-Biology_Accno
-center_source
-COMS_id
-country
-crs
-dataset
-date
-Displacemnt_Vol_001
-GMT_sample_start_time
-lat
-Lge_removed
-lon
-Orig_Stat_Num
-originators_cruise_identifier
-Preservation
-Project
-Sampling_duration
-Taxon_count_002
-Taxon_count_003
-temp_QC_COMS
-Temperature
-Temperature_BOT_cor
-Temperature_sigfigs
-Temperature_WODflag
-Temperature_WODprofileflag
-time
-WOD_cruise_identifier
-wod_unique_cast
-WODf
-WODfd
-WODfp
-z
-z_BOT_cor
-z_sigfig
-z_WODflag
+The variables included in the WOD18 netCDF files can be checked in Table 3 in the README.md
+
+we used the following metadata and secondly stat information to calculate the Profile Summary Score (PSS) for each profiles
+meta_names = ['WOD_unique_id','accession_number', 'dataset_id', 'lat', 'lon', 'year', 'month', 'day', 'probe type',
+              'recorder', 'hour', 'minute', 'depth_number', 'maximum_depth', 'hasTemp', 'hasSalinity', 'hasOxygen',
+              'hasChlonophyll', 'country_name', 'GMT_time', 'WMO_ID', 'dbase_orig', 'project_name', 'Platform',
+              'ocean_vehicle', 'Institute', 'WOD_cruise_identifier', 'sum_temp', 'sum_salinity', 'sum_depth',
+              'std_depth', 'std_temp', 'std_salinity', 'corr_temp_depth', 'corr_sal_depth']
+
+The order in 'meta_names' CANNOT be modifed. Please strictly following this order. Keep NaN or set it as '' if this information is missing.
+
+Read the Section 5 of README file to customize your own netCDf file (if necessary).
+
+PSS = Profile Summary Score (See Song et al., 2024;Frontier in Mairne Science)
+
+The calculation of the PSS will be done in the N01_Possible_Duplicate_Check.py
 
 Usage:
     Run this script and follow the prompt to enter the directory path containing netCDF files.
@@ -55,9 +49,9 @@ from netCDF4 import Dataset
 from datetime import datetime, timedelta
 import warnings
 import sys
-import pandas as pd
-import xarray as xr
+import argparse
 
+## Used to determine whether the input path is correct
 def validate_path(input_path):
     # Normalize the path
     normalized_path = os.path.normpath(input_path)
@@ -68,18 +62,18 @@ def validate_path(input_path):
 
     return True
 
-
-def read_netCDF_formatted_DNA_series(filepath):
+#Read NetCDF files and pre-processing metadata and secondary processing data. Retain numerical metadata and convert string metadata into numerical values by using the ASCII code table and then summing these ASCII code values of each letter to obtain a single value.
+def read_netCDF_formatted_PSS_series(inputpath, outputpath):
 
     warnings.filterwarnings("ignore")
 
     # Path where the netCDF files are stored
-    filepath = os.path.normpath(os.path.abspath(filepath))
-    print(filepath)
+    inputpath = os.path.normpath(os.path.abspath(inputpath))
+    print(inputpath)
 
 
     # Get all file names in the directory that are not directories themselves
-    filenames = [f for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
+    filenames = [f for f in os.listdir(inputpath) if os.path.isfile(os.path.join(inputpath, f))]
     n_prof = len(filenames)
 
     # print(filenames)
@@ -95,7 +89,7 @@ def read_netCDF_formatted_DNA_series(filepath):
     # Process each file
     for idx, filename in enumerate(filenames):
         print(f"Processing file {idx+1}/{n_prof}: {filename}")
-        file_path = os.path.join(filepath, filename)
+        file_path = os.path.join(inputpath, filename)
 
         # Open the netCDF file as xarray dataset
         try:
@@ -407,14 +401,30 @@ def read_netCDF_formatted_DNA_series(filepath):
 
 
 if __name__ == '__main__':
-    # filepath = '../Input_files/WOD18_sample_1995/'
-    # take input arguments and convert to file path
-    if len(sys.argv) > 1:
-        filepath = sys.argv[1].lstrip().rstrip()
-    else:
-        filepath = input("Please enter the path to your netCDF files: ").lstrip().rstrip()
-    
-    if validate_path(filepath):
-        read_netCDF_formatted_DNA_series(filepath)
-    else:
+
+    OutputDir = os.path.dirname(os.path.abspath(__file__)) + "/../Input_files"
+    InputDir = OutputDir + "/WOD18_sample_1995"
+
+    parser = argparse.ArgumentParser(description='Create Profile Summary Score')
+    parser.add_argument("-i", "--input", type=str, default=InputDir)
+    parser.add_argument("-o", "--output", type=str, default=OutputDir)
+    args = parser.parse_args()
+    InputDir = args.input
+    OutputDir = args.output
+
+    # check Input/Output dir vaild
+    isInputOK = validate_path(InputDir)
+    isOutputOK = validate_path(OutputDir)
+    if(not (isInputOK and isOutputOK)):
         print("The entered path is not valid. Please ensure the path is correct and try again.")
+        raise Exception("Invalid InputDir or OutputDir!", InputDir, OutputDir)
+    
+    PSS_summary_filename = OutputDir + "/Profile_Summary_Score_list.npz"
+    iAct = 1
+    if os.path.exists(PSS_summary_filename):
+        iAct = input("Update Profile Summary Score list or not(1: Yes (default); 0: No): ") or 1
+        print(iAct)
+
+    if (iAct == 1 or iAct == '1'):
+        read_netCDF_formatted_PSS_series(InputDir, OutputDir)
+        print("Profile_Summary_Score_list.npz Complete !")
