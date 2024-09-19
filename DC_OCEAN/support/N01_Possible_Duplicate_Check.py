@@ -1314,10 +1314,12 @@ def N02_14_PSS_check_PCA_95_allinfo(PSS_series,filename_info):
 def main(PSS_summary_filename):
     # Load *.npz data
     print('loading the PSS summary files....')
-    data = np.load(PSS_summary_filename)
+    data = np.load(PSS_summary_filename, allow_pickle=True)
     PSS_series = data['PSS_series']
     meta_names = data['meta_names']
-    filename_info = data['filenames']
+    # filename_info = data['filenames']
+    # coda format is multiprofile, so the coda_id is used as the filename
+    filename_info = data['CODA_id']
 
 
     ####### N02_1: run Crude Scrren" Arithmetic mean: standardlizatioin check
@@ -1399,7 +1401,7 @@ def save_txt_duplicate_list(All_potential_duplicate_list,PSS_summary_filename):
 
 if __name__ == '__main__':
     # filepath = '../Input_files/PSS_summary.npz'
-    PSS_summary_filename = os.path.dirname(os.path.abspath(__file__)) + "/../Input_files/"
+    PSS_summary_filename = os.path.dirname(os.path.abspath(__file__)) + "/../Input_files/Profile_Summary_Score_list.npz"
 
     parser = argparse.ArgumentParser(description='Potential Duplicate Check')
     parser.add_argument("-d", "--PSSfolder", type=str, default=PSS_summary_filename)

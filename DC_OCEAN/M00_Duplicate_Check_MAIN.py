@@ -84,6 +84,8 @@ if __name__ == '__main__':
     oChecker = Duplicate_Checker.DuplicateChecker()  
     oChecker.InitEnvironment(InputDir, OutputDir)  
 
+    # TODO: the input directory is used for all the input files, need to modify to use the PSSfolder, check the
+    #  output directory use too
     if(iMode == 0):
         #mode = 0:  DuplicateCheckeList
         DuplicateCheckeList(oChecker, InputDir, OutputDir)

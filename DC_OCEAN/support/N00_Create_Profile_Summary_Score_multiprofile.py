@@ -88,15 +88,18 @@ def read_netCDF_formatted_PSS_series_sub(inputpath, outputpath):
 
     # Get all file names in the directory that are not directories themselves
     filenames = [f for f in os.listdir(inputpath) if os.path.isfile(os.path.join(inputpath, f))]
-
+    #filenames = [filenames[i] for i in [1, 7]]
     # print(filenames)
     # Initialize data structures
-    meta_names = ['filename', 'WOD_id', 'CODA_id', 'Access_no', 'dataset', 'lat', 'lon', 'datetime',
-                  'Temperature_Instrument',
-                  'Recorder', 'needs_z_fix', 'depth_number', 'maximum_depth', 'hasTemp', 'hasSalinity', 'hasOxygen',
-                  'hasChlorophyll', 'country', 'WMO_ID', 'dbase_orig', 'Project', 'Platform',
+    # need to include 'CODA_id'. Swap with WOD_id for now so we don't have to change any of the subsequent functions
+    # include filename here and split it out at the end
+    meta_names = ['filename', 'CODA_id', 'Access_no', 'dataset', 'lat', 'lon', 'year', 'month', 'day', 'Temperature_Instrument',
+                  'Recorder', 'hour', 'minute', 'depth_number', 'maximum_depth', 'hasTemp', 'hasSalinity', 'hasOxygen',
+                  'hasChlorophyll', 'country', 'GMT_time', 'WMO_ID', 'dbase_orig', 'Project', 'Platform',
                   'ocean_vehicle', 'Institute', 'WOD_cruise_identifier', 'sum_temp', 'sum_salinity', 'sum_depth',
                   'std_depth', 'std_temp', 'std_salinity', 'corr_temp_depth', 'corr_sal_depth']
+
+    # 'needs_z_fix' is not included in the final table, but pulled out in the original code.
     # create an empty dataframe PSS_series_sub with meta_names as headers
     PSS_series = pd.DataFrame(columns=meta_names)
 
@@ -117,9 +120,8 @@ def read_netCDF_formatted_PSS_series_sub(inputpath, outputpath):
 
         # set up empty dataframe for this file
         PSS_series_sub = pd.DataFrame(columns=meta_names)
-
-        # add the filename
-        PSS_series_sub['filename'] = filename
+        # fill the dataframe with nans for the number of profiles
+        PSS_series_sub = PSS_series_sub.reindex(range(len(f['cast'].values)))
 
         # number of profiles is number of casts
         n_prof = len(f['cast'].values)
@@ -208,32 +210,38 @@ def read_netCDF_formatted_PSS_series_sub(inputpath, outputpath):
                 PSS_series_sub[f'has{var}'] = np.any(~np.isnan(f[var].values), axis=1)
 
         # Try to read various attributes and variables
-        for var in ['WMO_id', 'lat', 'lon', 'Access_no', 'WOD_id']:
+        for var in ['lat', 'lon', 'Access_no']:
             if var in f.variables:
                 PSS_series_sub[var] = np.float64(f[var].values)
 
         # Read and process date and time
-        time_var = f['time'].values
-        PSS_series_sub['datetime'] = nc.num2date(time_var, f['time'].attrs['units'])
+        time_var = nc.num2date(f['time'].values, f['time'].attrs['units'])
+        # get the year string from time_var
+        PSS_series_sub['year'] = np.array([x.year for x in time_var])
+        PSS_series_sub['month'] = np.array([x.month for x in time_var])
+        PSS_series_sub['day'] = np.array([x.day for x in time_var])
+        PSS_series_sub['hour'] = np.array([x.hour for x in time_var])
+        PSS_series_sub['minute'] = np.array([x.minute for x in time_var])
 
         # Loop over variables for ascii sum
-        for var in ['CODA_id', 'country', 'Temperature_Instrument', 'needs_z_fix', 'Recorder', 'dbase_orig',
+        for var in ['country', 'Temperature_Instrument', 'needs_z_fix', 'Recorder', 'dbase_orig',
                     'Project', 'Platform', 'WOD_cruise_identifier', 'Institute']:
             if var in f.variables:
                 var_char = np.array([x.decode('utf-8') for x in f[var].values], dtype=str)
-            else:
-                var_char = np.array(['' for _ in range(n_prof)], dtype=str)
-            # convert the country_name, needs_z_fix and probe_type etc to ASCII sum
-            ASCII_sums = np.array([sum(ord(char) for char in string if char != ' ') for string in var_char])
-            PSS_series_sub[var] = ASCII_sums
+                # convert the country_name, needs_z_fix and probe_type etc to ASCII sum
+                ASCII_sums = np.array([sum(ord(char) for char in string if char != ' ') for string in var_char])
+                PSS_series_sub[var] = ASCII_sums
 
         if 'dataset' in f.variables:
             dataset_name = np.array([x.decode('utf-8') for x in f['dataset'].values], dtype=str)
-        else:
-            dataset_name = np.array(['' for _ in range(n_prof)], dtype=str)
-        # find the matching value from the dictionary
-        dataset_names = np.array([find_dataset_item(item) for item in dataset_name])
-        PSS_series_sub['dataset'] = dataset_names
+            # find the matching value from the dictionary
+            dataset_names = np.array([find_dataset_item(item) for item in dataset_name])
+            PSS_series_sub['dataset'] = dataset_names
+
+        # add the filename
+        PSS_series_sub['filename'] = filename
+        # add CODA_id
+        PSS_series_sub['CODA_id'] = f['CODA_id'].values
 
         # append the PSS_series_sub to the PSS_series
         PSS_series = PSS_series.append(PSS_series_sub, ignore_index=True)
@@ -241,8 +249,20 @@ def read_netCDF_formatted_PSS_series_sub(inputpath, outputpath):
         # Close the netCDF file
         f.close()
 
-    # Delete WOD_unique_id column
-    PSS_series = PSS_series.drop(columns=['WOD_id'])
+    # extract the filename column into a np array called filename
+    filename = PSS_series['filename'].values
+    # remove the filename column from the dataframe
+    PSS_series = PSS_series.drop(columns=['filename'])
+    # extract the CODA_id column into a np array called CODA_id
+    CODA_id = PSS_series['CODA_id'].values.astype(str)
+    # remove the CODA_id column from the dataframe
+    PSS_series = PSS_series.drop(columns=['CODA_id'])
+    # remove the first two values from meta_names
+    meta_names = meta_names[2:]
+
+    # Reformat the dataframe to match the requirements for following duplicate checking codes
+    # the dataframe needs to become a numpy array of values of float 32 type
+    PSS_series = PSS_series.values.astype(float)
 
     # check output folders
     script_directory = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -256,10 +276,12 @@ def read_netCDF_formatted_PSS_series_sub(inputpath, outputpath):
 
     # Save the data in .npz format
     output_filename = os.path.join(outputpath, 'Profile_Summary_Score_list.npz')
-    # Convert the DataFrame to a dictionary of arrays
-    data_dict = {col: PSS_series[col].values for col in PSS_series.columns}
+    # # Convert the DataFrame to a dictionary of arrays
+    # data_dict = {col: PSS_series[col].values for col in PSS_series.columns}
     # Save the dictionary to an .npz file
-    np.savez(output_filename, **data_dict)
+    # np.savez(output_filename, **data_dict)
+    # output the coda_id as filename since we have multiple profiles in one file
+    np.savez(output_filename, PSS_series=PSS_series, filenames=filename, CODA_id = CODA_id, meta_names=meta_names)
 
     print('*******************FINISHED***********************************\n')
     print('The Profile Summary Score formatted file are output to current folder: ' + outputpath + '\n')

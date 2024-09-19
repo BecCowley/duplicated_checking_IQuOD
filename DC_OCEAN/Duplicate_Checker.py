@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import datetime
 ########################################################################
 ### @copyright Copyright (C) 2024 All Rights Reserved.
 ### @file  Duplicate_Checker.py
@@ -15,6 +15,7 @@
 import os
 import argparse
 import netCDF4 as nc
+import xarray as xr
 import numpy as np
 import math
 from util import country_table as t_country
@@ -187,8 +188,14 @@ class DuplicateChecker(object):
                     ### Read the second netCDF file data
                     content2=self.read_nc_data(filepath2)
                 except:
-                    print('Failed reading: '+file1+' and '+file2)
-                    continue
+                    try:
+                        #multiple profile netcdf file
+                        content1=self.read_nc_data_multiprofile(netCDF_filepath, file1)   # content1 is a dictionary
+                        ### Read the second netCDF file data
+                        content2=self.read_nc_data_multiprofile(netCDF_filepath, file2)
+                    except:
+                        print('Failed reading: ' + file1 + ' and ' + file2)
+                        continue
 
                 ### Compare the data
                 isDuplicated,duplicate_multimodels=compair_main.compair(content1,content2)
@@ -416,6 +423,193 @@ class DuplicateChecker(object):
         self.add_parameters(t_parameters, Institute=Institute, need_z_fix=need_z_fix,WOD_cruise_identifier=WOD_cruise_identifier, wod_unique_id=wod_unique_id,access_no=access_no, depth=depth, temp=temp, sal=sal, dataset_id=dataset_id,dataset_name=dataset_name, latitude=latitude, longitude=longitude, probe_type=probe_type,recorder=recorder, year=year, month=month, day=day, hour=hour, minute=minute,depth_number=depth_number, maximum_depth=maximum_depth, hasTemp=hasTemp,hasSalinity=hasSalinity, hasOxygen=hasOxygen, hasChlonophyII=hasChlonophyII,country_id=country_id, GMT_time=GMT_time, WMO_id=WMO_id, dbase_orig=dbase_orig,project_name=project_name, Platform=Platform, ocean_vehicle=ocean_vehicle,sum_depth=sum_depth, sum_temp=sum_temp, sum_salinity=sum_salinity, std_depth=std_depth,std_temp=std_temp, std_salinity=std_salinity, cor_temp_depth=cor_temp_depth,cor_sal_depth=cor_sal_depth, Wind_Direction=Wind_Direction, Wind_Speed=Wind_Speed,Cast_Direction=Cast_Direction)
         return t_parameters
 
+    ## read metadata and secondary data from the original netCDF file (CODA multiple profile format)
+    def read_nc_data_multiprofile(self, filepath, coda_id):
+        # extract the filename from the coda_id in format 'NNNdddYYYY' where NNN is the database id, ddd is the datatype (eg, osd) and YYYY is the year
+        # the filename is in the format 'NNN_CODA_YYYY_ddd.nc'
+        # split the coda_id into the database id, datatype and year
+        db_id = coda_id[0:3].upper()
+        datatype = coda_id[3:6].lower()
+        year = coda_id[6:10]
+        # create the filename
+        if 'WOD' in db_id:
+            filename = db_id + '2018_CODA_' + year + '_' + datatype + '.nc'
+        else:
+            filename = db_id + '_CODA_' + year + '_' + datatype + '.nc'
+
+        #use xarray to read the file:
+        f = xr.open_dataset(os.path.join(filepath, filename))
+        # find the index of this coda_id in the CODA_id variable
+        index = np.where(f['CODA_id'].astype(str).values == coda_id)[0][0]
+        try:
+            probe_type = str(f['Temperature_Instrument'][index].astype(str).values[0])
+        except:
+            probe_type = ''
+        try:
+            recorder = str(f['Recorder'][index].values.astype(str))
+        except:
+            recorder = ''
+
+        wod_unique_id = f['CODA_id'][index].values.astype(str)
+        try:
+            access_no = f['Access_no'][index].values
+        except:
+            access_no = np.isnan  # setting the missing value for string variables
+
+        time = f['time'][index].values
+        dtime = time.astype('M8[ms]').astype(datetime.datetime)
+        year = dtime.year
+        month = dtime.month
+        day = dtime.day
+        hour = dtime.hour
+        minute = dtime.minute
+
+        dataset_name = str(f['dataset'][index].values.astype(str))
+        dataset_id = self.find_order_dataset(dataset_name)
+
+        latitude = round(float(f['lat'][index].values), 4)
+        longitude = round(float(f['lon'][index].values), 4)
+
+        depth = f['z'][index].values
+        depth[np.logical_or(depth > 12000, depth < -10)] = np.nan  # setting the missing value
+
+        depth_number = len(depth)
+        maximum_depth = depth[-1]
+        sum_depth = round(np.nansum(depth), 4)
+        std_depth = round(np.nanstd(depth), 4)
+        if (np.isnan(sum_depth)):
+            sum_depth = np.isnan  # setting the missing value
+        if (np.isnan(std_depth)):
+            std_depth = np.isnan  # setting the missing value
+
+        try:
+            temp = f['Temperature'][index].values
+            temp[np.logical_or(temp > 40, temp < -2.5)] = np.nan
+            temp2 = temp[~np.isnan(temp)]
+            depth2 = depth[~np.isnan(temp)]
+            hasTemp = 1
+            sum_temp = round(np.nansum(temp), 4)
+            std_temp = round(np.nanstd(temp), 4)
+            cor_temp_depth = np.corrcoef(temp2, depth2)[1, 0]
+            cor_temp_depth = round(cor_temp_depth, 5)
+            if (np.isnan(cor_temp_depth)):
+                cor_temp_depth = 999  # setting the missing value
+        except:
+            temp = np.full((depth_number, 1), np.nan)
+            hasTemp = 0
+            sum_temp = 0
+            std_temp = 999  # setting the missing value
+            cor_temp_depth = 999  # setting the missing value
+
+        try:
+            sal = f['Salinity'][index].values
+            sal[np.logical_or(sal > 43, sal < 0)] = np.nan  # setting the missing value
+            sal2 = sal[~np.isnan(sal)]
+            depth2 = depth[~np.isnan(sal)]
+            hasSalinity = 1
+            sum_salinity = round(np.nansum(sal), 4)
+            std_salinity = round(np.nanstd(sal), 4)
+            cor_sal_depth = round(np.corrcoef(sal2, depth2)[1, 0], 5)
+            if (np.isnan(cor_sal_depth)):
+                cor_sal_depth = 999  # setting the missing value
+        except:
+            sal = np.full((depth_number, 1), np.nan)
+            sum_salinity = 0
+            hasSalinity = 0
+            std_salinity = 999  # setting the missing value
+            cor_sal_depth = 999  # setting the missing value
+
+        try:
+            oxy = f['Oxygen'][index].values
+            hasOxygen = 1
+        except:
+            hasOxygen = 0
+
+        try:
+            Chlonophyll = f['Chlorophyll'][index].values
+            hasChlonophyII = 1
+        except:
+            hasChlonophyII = 0
+
+        country_name = str(f['country'][index].values.astype(str))
+        country_id = self.find_id_country(country_name)
+
+        try:
+            GMT_time = round(float(f['GMT_time'][index].values), 2)
+        except:
+            GMT_time = 0
+        try:
+            WMO_id = int(f['WMO_ID'][index].values)
+        except:
+            WMO_id = np.isnan  # setting the missing value for string variables
+
+        try:
+            dbase_orig = str(f['dbase_orig'][index].values.astype(str))
+        except:
+            dbase_orig = ''  # setting the missing value for string variables
+        try:
+            project_name = str(f['Project'][index].values.astype(str))
+        except:
+            project_name = ''  # setting the missing value for string variables
+        try:
+            Platform = str(f['Platform'][index].values.astype(str))
+        except:
+            Platform = ''  # setting the missing value for string variables
+
+        try:
+            ocean_vehicle = str(f['Ocean_Vehicle'][index].values.astype(str))
+        except:
+            ocean_vehicle = ''  # setting the missing value for string variables
+
+        try:
+            Institute = str(f['Institute'][index].values.astype(str))
+        except:
+            Institute = ''  # setting the missing value for string variables
+
+        try:
+            WOD_cruise_identifier = str(f['WOD_cruise_identifier'][index].values.astype(str))
+        except:
+            WOD_cruise_identifier = ''  # setting the missing value for string variables
+
+        try:
+            need_z_fix = str(f['need_z_fix'][index].values.astype(str))
+        except:
+            need_z_fix = ''  # setting the missing value for string variables
+
+        try:
+            Wind_Direction = str(f['Wind_Direction'][index].values.astype(str))
+        except:
+            Wind_Direction = ''  # setting the missing value for string variables
+
+        try:
+            Wind_Speed = f['Wind_Speed'][index].values
+        except:
+            Wind_Speed = 999
+
+        try:
+            cast_direction = str(f['Cast_Direction'][index].values.astype(str))
+            ### Converts the Cast Direction information to uppercase
+            Cast_Direction = cast_direction.upper()
+        except:
+            Cast_Direction = ''
+
+        ### Save with dictionary
+        t_parameters = {}
+        self.add_parameters(t_parameters, Institute=Institute, need_z_fix=need_z_fix,
+                            WOD_cruise_identifier=WOD_cruise_identifier, wod_unique_id=wod_unique_id,
+                            access_no=access_no, depth=depth, temp=temp, sal=sal, dataset_id=dataset_id,
+                            dataset_name=dataset_name, latitude=latitude, longitude=longitude, probe_type=probe_type,
+                            recorder=recorder, year=year, month=month, day=day, hour=hour, minute=minute,
+                            depth_number=depth_number, maximum_depth=maximum_depth, hasTemp=hasTemp,
+                            hasSalinity=hasSalinity, hasOxygen=hasOxygen, hasChlonophyII=hasChlonophyII,
+                            country_id=country_id, GMT_time=GMT_time, WMO_id=WMO_id, dbase_orig=dbase_orig,
+                            project_name=project_name, Platform=Platform, ocean_vehicle=ocean_vehicle,
+                            sum_depth=sum_depth, sum_temp=sum_temp, sum_salinity=sum_salinity, std_depth=std_depth,
+                            std_temp=std_temp, std_salinity=std_salinity, cor_temp_depth=cor_temp_depth,
+                            cor_sal_depth=cor_sal_depth, Wind_Direction=Wind_Direction, Wind_Speed=Wind_Speed,
+                            Cast_Direction=Cast_Direction)
+        return t_parameters
+
     def find_id_country(self,country_name):
         country_name=country_name.upper()
         try:
@@ -518,7 +712,7 @@ class DuplicateChecker(object):
     def output_DuplicateList_txt(self,fid,content1,content2,duplicate_multimodels,file1,file2):
         duplicate_multimodels=duplicate_multimodels*1
         print('%20s,%20s,' % (file1,file2),end='',file=fid)
-        print('%20d,%20d,' % (content1['wod_unique_id'], content2['wod_unique_id']),end='',file=fid)
+        print('%20s,%20s,' % (content1['wod_unique_id'], content2['wod_unique_id']),end='',file=fid)
         print('%2d,%2d,%2d,%2d,%2d,%2d,%2d,%2d,%2d,%2d,%2d,%2d,' % (duplicate_multimodels[0],duplicate_multimodels[1],duplicate_multimodels[2],duplicate_multimodels[3],duplicate_multimodels[4],duplicate_multimodels[5],duplicate_multimodels[6],duplicate_multimodels[7],duplicate_multimodels[8],duplicate_multimodels[9],duplicate_multimodels[10],duplicate_multimodels[11]),end='',file=fid)
         print('%20s,%20s,' % (content1['dataset_name'], content2['dataset_name']),end='',file=fid)
         print('%10d,%10d,' % (content1['access_no'], content2['access_no']),end='',file=fid)
@@ -550,7 +744,7 @@ class DuplicateChecker(object):
     ### Output a txt file containing the metadata information of nonduplicated profiles
     def output_UnduplicateList_txt(self,fid,content1,content2,file1,file2):
         print('%20s,%20s,' % (file1,file2),end='',file=fid)
-        print('%20d,%20d,' % (content1['wod_unique_id'], content2['wod_unique_id']),end='',file=fid)
+        print('%20s,%20s,' % (content1['wod_unique_id'], content2['wod_unique_id']),end='',file=fid)
         print('%20s,%20s,' % (content1['dataset_name'], content2['dataset_name']),end='',file=fid)
         print('%10d,%10d,' % (content1['access_no'], content2['access_no']),end='',file=fid)
         print('%10.4f, %10.4f,' %(content1['latitude'], content2['latitude']),end="",file=fid)
